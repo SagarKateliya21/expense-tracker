@@ -17,6 +17,8 @@ with app.app_context():
 
 @app.route("/")
 def landing():
+    if session.get("user_id"):
+        return redirect(url_for("profile"))
     return render_template("landing.html")
 
 
@@ -95,7 +97,39 @@ def dashboard():
 
 @app.route("/profile")
 def profile():
-    return "Profile page — coming in Step 4"
+    if not session.get("user_id"):
+        return redirect(url_for("login"))
+    user = {
+        "name": "Priya Sharma",
+        "email": "priya@example.com",
+        "member_since": "January 2025",
+    }
+    stats = {
+        "total_spent": "₹6,340",
+        "transaction_count": 8,
+        "top_category": "Shopping",
+    }
+    transactions = [
+        {"date": "10 Jun 2026", "description": "Clothing",            "category": "Shopping",      "amount": "₹2,500"},
+        {"date": "03 Jun 2026", "description": "Electricity bill",    "category": "Bills",         "amount": "₹1,200"},
+        {"date": "05 Jun 2026", "description": "Pharmacy",            "category": "Health",        "amount": "₹800"},
+        {"date": "12 Jun 2026", "description": "Miscellaneous",       "category": "Other",         "amount": "₹600"},
+        {"date": "01 Jun 2026", "description": "Lunch at cafe",       "category": "Food",          "amount": "₹450"},
+        {"date": "08 Jun 2026", "description": "Movie tickets",       "category": "Entertainment", "amount": "₹350"},
+        {"date": "15 Jun 2026", "description": "Groceries",           "category": "Food",          "amount": "₹320"},
+        {"date": "02 Jun 2026", "description": "Metro card recharge", "category": "Transport",     "amount": "₹120"},
+    ]
+    categories = [
+        {"name": "Shopping",      "amount": "₹2,500", "pct": 39},
+        {"name": "Bills",         "amount": "₹1,200", "pct": 19},
+        {"name": "Health",        "amount": "₹800",   "pct": 13},
+        {"name": "Food",          "amount": "₹770",   "pct": 12},
+        {"name": "Other",         "amount": "₹600",   "pct": 9},
+        {"name": "Entertainment", "amount": "₹350",   "pct": 6},
+        {"name": "Transport",     "amount": "₹120",   "pct": 2},
+    ]
+    return render_template("profile.html", user=user, stats=stats,
+                           transactions=transactions, categories=categories)
 
 
 @app.route("/expenses/add")

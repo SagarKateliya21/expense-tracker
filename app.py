@@ -1,7 +1,11 @@
 import sqlite3
-from flask import Flask, flash, redirect, render_template, request, session, url_for
+from datetime import datetime
+from flask import Flask, abort, flash, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
-from database.db import get_db, init_db, seed_db, create_user, get_user_by_email
+from database.db import (
+    get_db, init_db, seed_db, create_user, get_user_by_email,
+    get_user_by_id, get_expenses_by_user, get_expense_stats, get_category_breakdown,
+)
 
 app = Flask(__name__)
 app.secret_key = "spendly-dev-secret"
@@ -9,6 +13,37 @@ app.secret_key = "spendly-dev-secret"
 with app.app_context():
     init_db()
     seed_db()
+
+
+# ------------------------------------------------------------------ #
+# Formatting helpers                                                  #
+# ------------------------------------------------------------------ #
+
+def _fmt_inr(amount):
+    return "₹{:,.0f}".format(amount)
+
+
+def _fmt_date(date_str):
+    return datetime.strptime(date_str, "%Y-%m-%d").strftime("%d %b %Y")
+
+
+def _fmt_member_since(created_at):
+    return datetime.strptime(created_at[:19], "%Y-%m-%d %H:%M:%S").strftime("%B %Y")
+
+
+def _compute_pcts(rows):
+    if not rows:
+        return []
+    grand = sum(r["total"] for r in rows)
+    if grand == 0:
+        return [0] * len(rows)
+    floats = [r["total"] / grand * 100 for r in rows]
+    floors = [int(f) for f in floats]
+    diff = 100 - sum(floors)
+    order = sorted(range(len(floats)), key=lambda i: floats[i] - floors[i], reverse=True)
+    for i in range(diff):
+        floors[order[i]] += 1
+    return floors
 
 
 # ------------------------------------------------------------------ #
@@ -99,37 +134,55 @@ def dashboard():
 def profile():
     if not session.get("user_id"):
         return redirect(url_for("login"))
+
+    user_id = session["user_id"]
+
+    raw_user = get_user_by_id(user_id)
+    if raw_user is None:
+        abort(404)
+
     user = {
-        "name": "Priya Sharma",
-        "email": "priya@example.com",
-        "member_since": "January 2025",
+        "name":         raw_user["name"],
+        "email":        raw_user["email"],
+        "member_since": _fmt_member_since(raw_user["created_at"]),
     }
-    stats = {
-        "total_spent": "₹6,340",
-        "transaction_count": 8,
-        "top_category": "Shopping",
-    }
+
+    raw_txns = get_expenses_by_user(user_id)
     transactions = [
-        {"date": "10 Jun 2026", "description": "Clothing",            "category": "Shopping",      "amount": "₹2,500"},
-        {"date": "03 Jun 2026", "description": "Electricity bill",    "category": "Bills",         "amount": "₹1,200"},
-        {"date": "05 Jun 2026", "description": "Pharmacy",            "category": "Health",        "amount": "₹800"},
-        {"date": "12 Jun 2026", "description": "Miscellaneous",       "category": "Other",         "amount": "₹600"},
-        {"date": "01 Jun 2026", "description": "Lunch at cafe",       "category": "Food",          "amount": "₹450"},
-        {"date": "08 Jun 2026", "description": "Movie tickets",       "category": "Entertainment", "amount": "₹350"},
-        {"date": "15 Jun 2026", "description": "Groceries",           "category": "Food",          "amount": "₹320"},
-        {"date": "02 Jun 2026", "description": "Metro card recharge", "category": "Transport",     "amount": "₹120"},
+        {
+            "date":        _fmt_date(row["date"]),
+            "description": row["description"],
+            "category":    row["category"],
+            "amount":      _fmt_inr(row["amount"]),
+        }
+        for row in raw_txns
     ]
+
+    raw_stats = get_expense_stats(user_id)
+    stats = {
+        "total_spent":       _fmt_inr(raw_stats["total_spent"]),
+        "transaction_count": raw_stats["transaction_count"],
+        "top_category":      raw_stats["top_category"] or "—",
+    }
+
+    raw_cats = get_category_breakdown(user_id)
+    pcts = _compute_pcts(raw_cats)
     categories = [
-        {"name": "Shopping",      "amount": "₹2,500", "pct": 39},
-        {"name": "Bills",         "amount": "₹1,200", "pct": 19},
-        {"name": "Health",        "amount": "₹800",   "pct": 13},
-        {"name": "Food",          "amount": "₹770",   "pct": 12},
-        {"name": "Other",         "amount": "₹600",   "pct": 9},
-        {"name": "Entertainment", "amount": "₹350",   "pct": 6},
-        {"name": "Transport",     "amount": "₹120",   "pct": 2},
+        {
+            "name":   row["category"],
+            "amount": _fmt_inr(row["total"]),
+            "pct":    pcts[i],
+        }
+        for i, row in enumerate(raw_cats)
     ]
-    return render_template("profile.html", user=user, stats=stats,
-                           transactions=transactions, categories=categories)
+
+    return render_template(
+        "profile.html",
+        user=user,
+        stats=stats,
+        transactions=transactions,
+        categories=categories,
+    )
 
 
 @app.route("/expenses/add")
